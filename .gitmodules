@@ -1,0 +1,3 @@
+[submodule "comp_prog"]
+	path = comp_prog
+	url = https://xyz600600@bitbucket.org/xyz600600/comp_prog_library.git
