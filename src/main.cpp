@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <iostream>
 #include <map>
+#include <random>
 #include <unordered_set>
 #include <vector>
 
@@ -166,6 +167,42 @@ struct Command
     }
 };
 
+// -- start implementation --
+
+vector<size_t> SelectUnitList(SparseGraph<Node>& graph, const size_t unit_size)
+{
+    vector<size_t> ret;
+
+    int id = 0;
+    for (size_t iter = 0; iter < unit_size; iter++)
+    {
+        ret.push_back(id);
+        id = (id == graph.size() - 1 ? 0 : id + 1);
+    }
+
+    return ret;
+}
+
+Command SelectCommand(SparseGraph<Node>& graph, const std::size_t selfId)
+{
+    for (std::size_t i = 0; i < graph.size(); i++)
+    {
+        if (graph.node(i).PlayerId == selfId)
+        {
+            for (auto next : graph.neighbor(i))
+            {
+                if (graph.node(next).PlayerId == -1)
+                {
+                    return Command(i, next, graph.node(i).UnitCount);
+                }
+            }
+        }
+    }
+    assert(false);
+}
+
+// -- end implementation --
+
 SparseGraph<Node> ParseGraph(const nlohmann::json& obj)
 {
     SparseGraph<Node> graph;
@@ -195,44 +232,11 @@ SparseGraph<Node> ParseGraph(const nlohmann::json& obj)
     return graph;
 }
 
-vector<size_t> SelectUnitList(SparseGraph<Node>& graph, const size_t unit_size)
-{
-    vector<size_t> ret;
-
-    int id = 0;
-    for (size_t iter = 0; iter < unit_size; iter++)
-    {
-        ret.push_back(id);
-        id = (id == graph.size() - 1 ? 0 : id + 1);
-    }
-
-    return ret;
-}
-
 void SendUnitList(const vector<size_t>& command_list)
 {
     nlohmann::json obj;
     obj["positions"] = command_list;
-    cerr << obj.dump() << endl;
     cout << obj.dump() << endl;
-}
-
-Command SelectCommand(SparseGraph<Node>& graph, const std::size_t selfId)
-{
-    for (std::size_t i = 0; i < graph.size(); i++)
-    {
-        if (graph.node(i).PlayerId == selfId)
-        {
-            for (auto next : graph.neighbor(i))
-            {
-                if (graph.node(next).PlayerId == -1)
-                {
-                    return Command(i, next, graph.node(i).UnitCount);
-                }
-            }
-        }
-    }
-    assert(false);
 }
 
 void SendCommandList(const Command& command)
@@ -241,7 +245,6 @@ void SendCommandList(const Command& command)
     obj["src"] = command.SrcNodeId;
     obj["dst"] = command.DstNodeId;
     obj["num"] = command.UnitNum;
-    cerr << obj.dump() << endl;
     cout << obj.dump() << endl;
 }
 
