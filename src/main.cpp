@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <map>
@@ -168,26 +169,137 @@ struct Command
 };
 
 // -- start implementation --
+// SelectUnitList
 
-vector<size_t> SelectUnitList(SparseGraph<Node>& graph, const size_t unit_size)
+class NodelessSolver
 {
-    vector<size_t> ret;
+public:
+    NodelessSolver();
 
-    int id = 0;
-    for (size_t iter = 0; iter < unit_size; iter++)
-    {
-        ret.push_back(id);
-        id = (id == graph.size() - 1 ? 0 : id + 1);
-    }
+    vector<size_t> SelectUnitList(SparseGraph<Node>& graph, const size_t unit_size, mt19937_64& mt);
 
-    return ret;
+    Command SelectCommand(SparseGraph<Node>& graph, mt19937_64& mt);
+
+    size_t UID() { return uid_; }
+
+    void SetUID(const size_t uid) { this->uid_ = uid; }
+
+private:
+    const static int InitializationTimeLimit = 1000;
+
+    const static int InitializationTimeCheckFrequency = 128;
+
+    chrono::system_clock::time_point start;
+
+    size_t uid_;
+};
+
+NodelessSolver::NodelessSolver()
+{
+    start = chrono::system_clock::now();
 }
 
-Command SelectCommand(SparseGraph<Node>& graph, const std::size_t selfId)
+vector<size_t> NodelessSolver::SelectUnitList(SparseGraph<Node>& graph, const size_t unit_size, mt19937_64& mt)
+{
+    vector<double> score_list(graph.size(), 0);
+
+    auto PushScore = [&](const int n1) {
+        for (auto n2 : graph.neighbor(n1))
+        {
+            score_list[n2] += 1.0 / graph.neighbor(n1).size();
+        }
+    };
+
+    auto RemoveScore = [&](const int n1) {
+        for (auto n2 : graph.neighbor(n1))
+        {
+            score_list[n2] -= 1.0 / graph.neighbor(n1).size();
+        }
+    };
+
+    auto CalculateScore = [&]() {
+        double ret = 0;
+        for (auto& s : score_list)
+        {
+            ret += sqrt(max(0.0, s));
+        }
+        return ret;
+    };
+
+    vector<size_t> ret;
+    uniform_int_distribution<int> rand(0, graph.size() - 1);
+
+    // initialize
+    for (int i = 0; i < unit_size; i++)
+    {
+        const int n1 = rand(mt);
+        ret.push_back(n1);
+        PushScore(n1);
+    }
+
+    auto score = CalculateScore();
+    double best_score = score;
+    vector<size_t> best_ret(ret);
+
+    double timerate = 0.0;
+
+    uniform_real_distribution<double> rand_sa;
+
+    auto Accept = [&](const double score_diff) {
+        return score_diff >= 0.0 || rand_sa(mt) < exp(score_diff * timerate * 10);
+    };
+
+    uniform_int_distribution<int> rand_pos(0, unit_size - 1);
+    int iter = 0;
+    // SA
+    while (true)
+    {
+        const auto index = rand_pos(mt);
+        const auto prev_node = ret[index];
+        const auto new_node = rand(mt);
+        RemoveScore(prev_node);
+        PushScore(new_node);
+        const auto new_score = CalculateScore();
+        if (Accept(new_score - score))
+        {
+            score = new_score;
+            ret[index] = new_node;
+
+            if (best_score < score)
+            {
+                best_score = score;
+                copy(ret.begin(), ret.end(), best_ret.begin());
+            }
+        }
+        else
+        {
+            RemoveScore(new_node);
+            PushScore(prev_node);
+        }
+
+        if (iter++ % InitializationTimeCheckFrequency == 0)
+        {
+            auto end = chrono::system_clock::now();
+            auto time = chrono::duration_cast<chrono::milliseconds>(end - start).count();
+            timerate = static_cast<double>(time) / InitializationTimeLimit;
+            if (time > InitializationTimeLimit)
+            {
+                break;
+            }
+        }
+    }
+
+    return best_ret;
+}
+
+// SelectCommand
+
+Command NodelessSolver::SelectCommand(SparseGraph<Node>& graph, mt19937_64& mt)
 {
     for (std::size_t i = 0; i < graph.size(); i++)
     {
-        if (graph.node(i).PlayerId == selfId)
+        const auto& node = graph.node(i);
+        if (node.PlayerId == UID() && node.UnitCount > 0)
         {
             for (auto next : graph.neighbor(i))
             {
@@ -228,7 +340,6 @@ SparseGraph<Node> ParseGraph(const nlohmann::json& obj)
         graph.node(i).PlayerId = states[i];
         graph.node(i).UnitCount = 1;
     }
-
     return graph;
 }
 
@@ -250,7 +361,9 @@ void SendCommandList(const Command& command)
 
 int main()
 {
-    size_t playerId;
+    NodelessSolver solver;
+
+    mt19937_64 mt;
 
     while (true)
     {
@@ -262,14 +375,14 @@ int main()
         if (obj["action"] == "init")
         {
             auto graph = ParseGraph(obj);
-            playerId = obj["uid"];
+            solver.SetUID(obj["uid"]);
             const size_t UnitSize = obj["num_units"];
-            SendUnitList(SelectUnitList(graph, UnitSize));
+            SendUnitList(solver.SelectUnitList(graph, UnitSize, mt));
         }
         else if (obj["action"] == "play")
         {
             auto graph = ParseGraph(obj);
-            SendCommandList(SelectCommand(graph, playerId));
+            SendCommandList(solver.SelectCommand(graph, mt));
         }
         else if (obj["action"] == "quit")
         {
