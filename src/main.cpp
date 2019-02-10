@@ -338,8 +338,15 @@ SparseGraph<Node> ParseGraph(const nlohmann::json& obj)
     for (size_t i = 0; i < states.size(); i++)
     {
         graph.node(i).PlayerId = states[i];
-        graph.node(i).UnitCount = 1;
     }
+
+    auto units = obj["units"];
+    assert(units.size() == graph.size());
+    for (std::size_t i = 0; i < units.size(); i++)
+    {
+        graph.node(i).UnitCount = units[i];
+    }
+
     return graph;
 }
 
