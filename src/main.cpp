@@ -182,7 +182,7 @@ private:
 
     const static int InitializationTimeCheckFrequency = 128;
 
-    chrono::system_clock::time_point start;
+    size_t accumulate_time;
 
     size_t DFS(const SparseGraph<Node>& graph, const std::size_t node, vector<bool>& visited);
 
@@ -192,16 +192,41 @@ private:
 
     vector<pair<size_t, size_t>> DivisionPositionList(const SparseGraph<Node>& graph);
 
+    chrono::system_clock::time_point start_;
+
+    void StartTimer();
+
+    void StopTimer();
+
+    bool TimeLimitExceeded()
+    {
+        cerr << accumulate_time << " | " << (7000 * 100) << endl;
+        return accumulate_time > 7000 * 100;
+    }
+
     size_t uid_;
 };
 
 NodelessSolver::NodelessSolver()
 {
-    start = chrono::system_clock::now();
+    accumulate_time = 0;
+}
+
+void NodelessSolver::StartTimer()
+{
+    start_ = chrono::system_clock::now();
+}
+
+void NodelessSolver::StopTimer()
+{
+    auto end = chrono::system_clock::now();
+    accumulate_time += chrono::duration_cast<chrono::microseconds>(end - start_).count();
 }
 
 vector<size_t> NodelessSolver::SelectUnitList(SparseGraph<Node>& graph, const size_t unit_size, mt19937_64& mt)
 {
+    StartTimer();
+
     vector<double> score_list(graph.size(), 0);
     vector<size_t> candidate;
     for (size_t i = 0; i < graph.size(); i++)
@@ -233,6 +258,8 @@ vector<size_t> NodelessSolver::SelectUnitList(SparseGraph<Node>& graph, const si
             break;
         }
     }
+
+    StopTimer();
 
     return ret;
 }
@@ -302,14 +329,25 @@ vector<pair<size_t, size_t>> NodelessSolver::DivisionPositionList(const SparseGr
 
             std::size_t min_cluster_size = all_empty_count;
 
+            // 隣接から DFS して訪れた場所は保存しておく
+            fill(visited.begin(), visited.end(), false);
+            visited[i] = true;
+
+            std::size_t rest_cluster_size = all_empty_count - 1;
+
             for (auto next : graph.neighbor(i))
             {
-                if (graph.node(next).PlayerId == EMPTY_PLAYER_ID)
+                if (!visited[next] && graph.node(next).PlayerId == EMPTY_PLAYER_ID)
                 {
-                    const auto empty_size = VisitableNodeSize(graph, i, next);
+                    const auto empty_size = DFS(graph, next, visited);
                     if (0 < empty_size && empty_size < all_empty_count - 1)
                     {
                         min_cluster_size = min(min_cluster_size, empty_size);
+                    }
+                    rest_cluster_size -= empty_size;
+                    if (rest_cluster_size == 0)
+                    {
+                        break;
                     }
                 }
             }
@@ -324,8 +362,11 @@ vector<pair<size_t, size_t>> NodelessSolver::DivisionPositionList(const SparseGr
 
 Command NodelessSolver::SelectCommand(SparseGraph<Node>& graph, mt19937_64& mt)
 {
+    StartTimer();
+
     auto division_list = DivisionPositionList(graph);
-    if (!division_list.empty())
+
+    if (!TimeLimitExceeded() && !division_list.empty())
     {
         sort(division_list.begin(), division_list.end(), greater<>());
         const auto [_, node] = division_list.front();
@@ -348,6 +389,7 @@ Command NodelessSolver::SelectCommand(SparseGraph<Node>& graph, mt19937_64& mt)
         }
         if (min_unit != graph.size() + 1)
         {
+            StopTimer();
             return Command(min_unit, graph.node(min_unit).prev_node, 1);
         }
     }
@@ -386,6 +428,7 @@ Command NodelessSolver::SelectCommand(SparseGraph<Node>& graph, mt19937_64& mt)
                     }
                 }
                 assert(graph.size() != best_node);
+                StopTimer();
                 return Command(i, best_node, 1);
             }
         }
