@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <iostream>
 #include <map>
+#include <queue>
 #include <random>
 #include <unordered_set>
 #include <vector>
@@ -121,28 +122,20 @@ private:
     bool undirected_;
 };
 
-enum NodeState
-{
-    // ある地点に 1個 Unit を置かれたら即座に持ち主が決定しうる場所
-    Closed,
-    // Closed なノードのうち、近傍に Closed と Open なノードを含むもの
-    Border,
-    // Closed でないノード
-    Opened,
-    // 初期値
-    Unknown,
-};
+constexpr int EMPTY_PLAYER_ID = -1;
 
 struct Node
 {
     int PlayerId;
     int UnitCount;
-    NodeState state;
+    // bfs する時の距離計算用 tmp
+    int distance;
+    // 復元用のグラフ
+    int prev_node;
 
     Node()
-        : PlayerId(-1)
+        : PlayerId(EMPTY_PLAYER_ID)
         , UnitCount(0)
-        , state(Unknown)
     {
     }
 };
@@ -193,7 +186,11 @@ private:
 
     size_t DFS(const SparseGraph<Node>& graph, const std::size_t node, vector<bool>& visited);
 
+    void BFS(SparseGraph<Node>& graph, const std::size_t node);
+
     size_t VisitableNodeSize(const SparseGraph<Node>& graph, const std::size_t base, const std::size_t next);
+
+    vector<pair<size_t, size_t>> DivisionPositionList(const SparseGraph<Node>& graph);
 
     size_t uid_;
 };
@@ -242,13 +239,42 @@ vector<size_t> NodelessSolver::SelectUnitList(SparseGraph<Node>& graph, const si
 
 // SelectCommand
 
+void NodelessSolver::BFS(SparseGraph<Node>& graph, const std::size_t init)
+{
+    queue<int> que;
+    que.emplace(init);
+    for (size_t i = 0; i < graph.size(); i++)
+    {
+        graph.node(i).distance = graph.size() + 1;
+    }
+
+    graph.node(init).distance = 0;
+    while (!que.empty())
+    {
+        auto node = que.front();
+        que.pop();
+        const auto prev_dist = graph.node(node).distance;
+
+        for (auto next : graph.neighbor(node))
+        {
+            auto& nn = graph.node(next);
+            if ((nn.PlayerId == EMPTY_PLAYER_ID || (nn.PlayerId == UID() && nn.UnitCount > 0)) && nn.distance > prev_dist + 1)
+            {
+                nn.distance = prev_dist + 1;
+                nn.prev_node = node;
+                que.push(next);
+            }
+        }
+    }
+}
+
 size_t NodelessSolver::DFS(const SparseGraph<Node>& graph, const std::size_t node, vector<bool>& visited)
 {
     visited[node] = true;
     size_t ret = 1;
     for (auto next : graph.neighbor(node))
     {
-        if (!visited[next] && graph.node(next).PlayerId == -1)
+        if (!visited[next] && graph.node(next).PlayerId == EMPTY_PLAYER_ID)
         {
             ret += DFS(graph, next, visited);
         }
@@ -263,8 +289,69 @@ size_t NodelessSolver::VisitableNodeSize(const SparseGraph<Node>& graph, const s
     return DFS(graph, next, visited);
 }
 
+vector<pair<size_t, size_t>> NodelessSolver::DivisionPositionList(const SparseGraph<Node>& graph)
+{
+    vector<pair<size_t, size_t>> result;
+
+    for (size_t i = 0; i < graph.size(); i++)
+    {
+        if (graph.node(i).PlayerId == EMPTY_PLAYER_ID)
+        {
+            vector<bool> visited(graph.size(), false);
+            const size_t all_empty_count = DFS(graph, i, visited);
+
+            std::size_t min_cluster_size = all_empty_count;
+
+            for (auto next : graph.neighbor(i))
+            {
+                if (graph.node(next).PlayerId == EMPTY_PLAYER_ID)
+                {
+                    const auto empty_size = VisitableNodeSize(graph, i, next);
+                    if (0 < empty_size && empty_size < all_empty_count - 1)
+                    {
+                        min_cluster_size = min(min_cluster_size, empty_size);
+                    }
+                }
+            }
+            if (min_cluster_size < all_empty_count)
+            {
+                result.emplace_back(min_cluster_size, i);
+            }
+        }
+    }
+    return result;
+}
+
 Command NodelessSolver::SelectCommand(SparseGraph<Node>& graph, mt19937_64& mt)
 {
+    auto division_list = DivisionPositionList(graph);
+    if (!division_list.empty())
+    {
+        sort(division_list.begin(), division_list.end(), greater<>());
+        const auto [_, node] = division_list.front();
+
+        BFS(graph, node);
+
+        int min_dist = graph.size() + 1;
+        int min_unit = graph.size() + 1;
+        for (int i = 0; i < graph.size(); i++)
+        {
+            const auto& nn = graph.node(i);
+            if (nn.PlayerId == UID() && nn.UnitCount > 0)
+            {
+                if (nn.distance < min_dist)
+                {
+                    min_dist = nn.distance;
+                    min_unit = i;
+                }
+            }
+        }
+        if (min_unit != graph.size() + 1)
+        {
+            return Command(min_unit, graph.node(min_unit).prev_node, 1);
+        }
+    }
+
     vector<size_t> candidate;
     for (size_t i = 0; i < graph.size(); i++)
     {
@@ -280,7 +367,7 @@ Command NodelessSolver::SelectCommand(SparseGraph<Node>& graph, mt19937_64& mt)
             vector<size_t> next_list;
             for (auto next : graph.neighbor(i))
             {
-                if (graph.node(next).PlayerId == -1)
+                if (graph.node(next).PlayerId == EMPTY_PLAYER_ID)
                 {
                     next_list.push_back(next);
                 }
