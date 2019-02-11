@@ -206,94 +206,38 @@ NodelessSolver::NodelessSolver()
 vector<size_t> NodelessSolver::SelectUnitList(SparseGraph<Node>& graph, const size_t unit_size, mt19937_64& mt)
 {
     vector<double> score_list(graph.size(), 0);
-
-    auto PushScore = [&](const int n1) {
-        for (auto n2 : graph.neighbor(n1))
-        {
-            score_list[n2] += 1.0 / graph.neighbor(n1).size();
-        }
-    };
-
-    auto RemoveScore = [&](const int n1) {
-        for (auto n2 : graph.neighbor(n1))
-        {
-            score_list[n2] -= 1.0 / graph.neighbor(n1).size();
-        }
-    };
-
-    auto CalculateScore = [&]() {
-        double ret = 0;
-        for (auto& s : score_list)
-        {
-            ret += sqrt(max(0.0, s));
-        }
-        return ret;
-    };
+    vector<size_t> candidate;
+    for (size_t i = 0; i < graph.size(); i++)
+    {
+        candidate.push_back(i);
+    }
+    sort(candidate.begin(), candidate.end(), [&](const size_t i, const size_t j) {
+        return graph.neighbor(i).size() < graph.neighbor(j).size();
+    });
 
     vector<size_t> ret;
-    uniform_int_distribution<int> rand(0, graph.size() - 1);
-
-    // initialize
-    for (int i = 0; i < unit_size; i++)
+    vector<bool> selected(graph.size(), false);
+    for (auto node : candidate)
     {
-        const int n1 = rand(mt);
-        ret.push_back(n1);
-        PushScore(n1);
-    }
-
-    auto score = CalculateScore();
-    double best_score = score;
-    vector<size_t> best_ret(ret);
-
-    double timerate = 0.0;
-
-    uniform_real_distribution<double> rand_sa;
-
-    auto Accept = [&](const double score_diff) {
-        return score_diff >= 0.0 || rand_sa(mt) < exp(score_diff * timerate * 10);
-    };
-
-    uniform_int_distribution<int> rand_pos(0, unit_size - 1);
-    int iter = 0;
-    // SA
-    while (true)
-    {
-        const auto index = rand_pos(mt);
-        const auto prev_node = ret[index];
-        const auto new_node = rand(mt);
-        RemoveScore(prev_node);
-        PushScore(new_node);
-        const auto new_score = CalculateScore();
-        if (Accept(new_score - score))
+        for (auto next : graph.neighbor(node))
         {
-            score = new_score;
-            ret[index] = new_node;
-
-            if (best_score < score)
+            if (!selected[next])
             {
-                best_score = score;
-                copy(ret.begin(), ret.end(), best_ret.begin());
+                selected[next] = true;
+                ret.push_back(next);
             }
-        }
-        else
-        {
-            RemoveScore(new_node);
-            PushScore(prev_node);
-        }
-
-        if (iter++ % InitializationTimeCheckFrequency == 0)
-        {
-            auto end = chrono::system_clock::now();
-            auto time = chrono::duration_cast<chrono::milliseconds>(end - start).count();
-            timerate = static_cast<double>(time) / InitializationTimeLimit;
-            if (time > InitializationTimeLimit)
+            if (ret.size() == unit_size)
             {
                 break;
             }
         }
+        if (ret.size() == unit_size)
+        {
+            break;
+        }
     }
 
-    return best_ret;
+    return ret;
 }
 
 // SelectCommand
