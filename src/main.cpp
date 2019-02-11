@@ -200,8 +200,8 @@ private:
 
     bool TimeLimitExceeded()
     {
-        cerr << accumulate_time << " | " << (7000 * 100) << endl;
-        return accumulate_time > 7000 * 100;
+        cerr << accumulate_time << " | " << (5000 * 1000) << endl;
+        return accumulate_time > 5000 * 1000;
     }
 
     size_t uid_;
@@ -364,33 +364,36 @@ Command NodelessSolver::SelectCommand(SparseGraph<Node>& graph, mt19937_64& mt)
 {
     StartTimer();
 
-    auto division_list = DivisionPositionList(graph);
-
-    if (!TimeLimitExceeded() && !division_list.empty())
+    if (!TimeLimitExceeded())
     {
-        sort(division_list.begin(), division_list.end(), greater<>());
-        const auto [_, node] = division_list.front();
+        auto division_list = DivisionPositionList(graph);
 
-        BFS(graph, node);
-
-        int min_dist = graph.size() + 1;
-        int min_unit = graph.size() + 1;
-        for (int i = 0; i < graph.size(); i++)
+        if (!division_list.empty())
         {
-            const auto& nn = graph.node(i);
-            if (nn.PlayerId == UID() && nn.UnitCount > 0)
+            sort(division_list.begin(), division_list.end(), greater<>());
+            const auto [_, node] = division_list.front();
+
+            BFS(graph, node);
+
+            int min_dist = graph.size() + 1;
+            int min_unit = graph.size() + 1;
+            for (int i = 0; i < graph.size(); i++)
             {
-                if (nn.distance < min_dist)
+                const auto& nn = graph.node(i);
+                if (nn.PlayerId == UID() && nn.UnitCount > 0)
                 {
-                    min_dist = nn.distance;
-                    min_unit = i;
+                    if (nn.distance < min_dist)
+                    {
+                        min_dist = nn.distance;
+                        min_unit = i;
+                    }
                 }
             }
-        }
-        if (min_unit != graph.size() + 1)
-        {
-            StopTimer();
-            return Command(min_unit, graph.node(min_unit).prev_node, 1);
+            if (min_unit != graph.size() + 1)
+            {
+                StopTimer();
+                return Command(min_unit, graph.node(min_unit).prev_node, 1);
+            }
         }
     }
 
@@ -441,8 +444,8 @@ Command NodelessSolver::SelectCommand(SparseGraph<Node>& graph, mt19937_64& mt)
 SparseGraph<Node> ParseGraph(const nlohmann::json& obj)
 {
     SparseGraph<Node> graph;
-    const auto node_list = obj["nodes"];
-    const auto edge_list = obj["edges"];
+    const auto& node_list = obj["nodes"];
+    const auto& edge_list = obj["edges"];
 
     for (auto& node : node_list)
     {
@@ -457,13 +460,13 @@ SparseGraph<Node> ParseGraph(const nlohmann::json& obj)
         graph.connect(from, to);
     }
 
-    auto states = obj["state"];
+    const auto& states = obj["state"];
     for (size_t i = 0; i < states.size(); i++)
     {
         graph.node(i).PlayerId = states[i];
     }
 
-    auto units = obj["units"];
+    const auto& units = obj["units"];
     assert(units.size() == graph.size());
     for (std::size_t i = 0; i < units.size(); i++)
     {
